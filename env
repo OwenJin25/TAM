@@ -1,0 +1,13 @@
+FLASK_ENV=development
+FLASK_DEBUG=1
+
+# PostgreSQL Database
+DATABASE_URL=postgresql://username:password@localhost:5432/scanguard
+
+# Security
+SECRET_KEY=your-secret-key-here
+
+# Arduino Settings
+ARDUINO_HOST=localhost
+ARDUINO_PORT=8080
+MAX_DISTANCE=400
