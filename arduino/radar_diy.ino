@@ -19,10 +19,10 @@ int angle = 0;
 int increment = 5;
 bool movingForward = true;
 
-// Configurações WiFi - ALTERE AQUI!
-const char* SSID = "SUA_REDE_WIFI";
-const char* PASSWORD = "SUA_SENHA_WIFI";
-const char* HOST = "seu-app.vercel.app"; // Altere depois do deploy
+// Configurações WiFi 
+const char* SSID = "iPhone de Owen";
+const char* PASSWORD = "1234567890";
+const char* HOST = "https://vercel.com/owens-projects-0be75bfe/tam"; 
 
 void setup() {
   Serial.begin(9600);
