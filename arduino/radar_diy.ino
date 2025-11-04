@@ -26,9 +26,9 @@ bool movingForward = true;
 bool wifiConnected = false;
 
 // Configurações WiFi - ALTERE AQUI!
-const char* SSID = "SUA_REDE_WIFI";
-const char* PASSWORD = "SUA_SENHA_WIFI";
-const char* HOST = "seu-app.vercel.app";
+const char* SSID = "iPhone de Owen";
+const char* PASSWORD = "1234567890";
+const char* HOST = "https://tam-two.vercel.app/";
 
 void setup() {
   Serial.begin(9600);
