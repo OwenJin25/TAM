@@ -60,7 +60,7 @@ def init_db():
                 )
             ''')
             
-            # Criar índice para melhor performance
+            # Criar índice para performance
             cur.execute('''
                 CREATE INDEX idx_radar_data_created_at 
                 ON radar_data(created_at DESC)
@@ -154,7 +154,6 @@ def home():
                 margin: 15px 0;
                 border-radius: 15px;
                 box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-                backdrop-filter: blur(10px);
                 border: 1px solid rgba(255,255,255,0.2);
             }
             
@@ -168,7 +167,7 @@ def home():
             
             .status-container {
                 display: grid;
-                grid-template-columns: 1fr 1fr;
+                grid-template-columns: 1fr 1fr 1fr;
                 gap: 15px;
                 margin-bottom: 20px;
             }
@@ -261,10 +260,6 @@ def home():
                 box-shadow: 0 4px 8px rgba(0,0,0,0.2);
             }
             
-            button:active {
-                transform: translateY(0);
-            }
-            
             button.clear {
                 background: #dc3545;
             }
@@ -285,10 +280,6 @@ def home():
                 .status-container,
                 .charts-container {
                     grid-template-columns: 1fr;
-                }
-                
-                .header h1 {
-                    font-size: 2rem;
                 }
             }
         </style>
@@ -312,12 +303,16 @@ def home():
                         <div>🗄️ Banco de Dados</div>
                         <div>Testando conexão...</div>
                     </div>
+                    <div id="ledStatus" class="status offline">
+                        <div>💡 LED RGB</div>
+                        <div>Desconhecido</div>
+                    </div>
                 </div>
-                <div id="lastUpdate" style="text-align: center; font-style: italic; color: #666;">
+                <div id="lastUpdate" style="text-align: center; margin-top: 10px; font-style: italic; color: #666;">
                     Última atualização: Nunca
                 </div>
             </div>
-            
+    
             <!-- Card de Gráficos -->
             <div class="card">
                 <h2>📈 Visualizações</h2>
@@ -374,7 +369,6 @@ def home():
 def api_status():
     """Endpoint para verificar status do sistema"""
     try:
-        # Testar conexão com banco
         conn = get_db_connection()
         if conn:
             conn.close()
@@ -388,7 +382,6 @@ def api_status():
             "timestamp": datetime.now().isoformat()
         })
     except Exception as e:
-        logger.error(f"Erro no endpoint de status: {e}")
         return jsonify({
             "status": "error",
             "database": "disconnected",
@@ -402,29 +395,18 @@ def handle_radar_data():
             data = request.get_json()
             
             if not data:
-                logger.warning("❌ POST sem dados JSON")
                 return jsonify({'error': 'Dados JSON inválidos'}), 400
             
             angle = data.get('angle')
             distance = data.get('distance')
             timestamp = data.get('timestamp')
             
-            # Validar dados
             if angle is None or distance is None:
-                logger.warning("❌ Dados incompletos recebidos")
                 return jsonify({'error': 'Ângulo e distância são obrigatórios'}), 400
-            
-            # Validar ranges
-            if not (0 <= angle <= 180):
-                return jsonify({'error': 'Ângulo deve estar entre 0 e 180'}), 400
-            
-            if not (0 <= distance <= 400):
-                return jsonify({'error': 'Distância deve estar entre 0 e 400 cm'}), 400
             
             # Salvar no PostgreSQL
             conn = get_db_connection()
             if conn is None:
-                logger.error("❌ Não foi possível conectar ao banco para salvar dados")
                 return jsonify({'error': 'Erro de conexão com o banco'}), 500
                 
             cur = conn.cursor()
@@ -438,19 +420,18 @@ def handle_radar_data():
             cur.close()
             conn.close()
             
-            logger.info(f"✅ Dados salvos: Ângulo={angle}°, Distância={distance}cm, Timestamp={timestamp}")
+            logger.info(f"✅ Dados salvos: Ângulo={angle}°, Distância={distance}cm")
             return jsonify({
                 'message': 'Dados salvos com sucesso',
                 'angle': angle,
-                'distance': distance,
-                'timestamp': timestamp
+                'distance': distance
             }), 201
             
         except Exception as e:
             logger.error(f"❌ Erro ao salvar dados: {e}")
             return jsonify({'error': str(e)}), 500
     
-    else:  # GET - Buscar todos os dados
+    else:  # GET
         try:
             conn = get_db_connection()
             if conn is None:
@@ -462,7 +443,7 @@ def handle_radar_data():
                 SELECT id, angle, distance, timestamp, created_at 
                 FROM radar_data 
                 ORDER BY created_at DESC 
-                LIMIT 1000
+                LIMIT 100
             ''')
             data = cur.fetchall()
             
@@ -479,11 +460,9 @@ def handle_radar_data():
             cur.close()
             conn.close()
             
-            logger.info(f"📊 Retornando {len(result)} registros")
             return jsonify(result)
             
         except Exception as e:
-            logger.error(f"❌ Erro ao buscar dados: {e}")
             return jsonify({'error': str(e)}), 500
 
 @app.route('/api/radar/latest')
@@ -520,7 +499,6 @@ def get_latest_data():
         return jsonify(result)
         
     except Exception as e:
-        logger.error(f"❌ Erro ao buscar dados recentes: {e}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/radar/clear', methods=['DELETE'])
@@ -533,100 +511,24 @@ def clear_old_data():
             
         cur = conn.cursor()
         
-        # Manter apenas os últimos 1000 registros
-        cur.execute('''
-            DELETE FROM radar_data 
-            WHERE id NOT IN (
-                SELECT id FROM radar_data 
-                ORDER BY created_at DESC 
-                LIMIT 1000
-            )
-        ''')
-        
+        cur.execute('DELETE FROM radar_data')
         deleted_count = cur.rowcount
+        
         conn.commit()
         cur.close()
         conn.close()
         
-        logger.info(f"🗑️ {deleted_count} registros antigos removidos")
+        logger.info(f"🗑️ {deleted_count} registros removidos")
         return jsonify({
-            'message': f'{deleted_count} registros antigos removidos',
-            'deleted_count': deleted_count
+            'message': f'{deleted_count} registros removidos'
         })
         
     except Exception as e:
-        logger.error(f"❌ Erro ao limpar dados: {e}")
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/radar/stats')
-def get_stats():
-    """Estatísticas dos dados"""
-    try:
-        conn = get_db_connection()
-        if conn is None:
-            return jsonify({'error': 'Erro de conexão com o banco'}), 500
-            
-        cur = conn.cursor()
-        
-        # Total de registros
-        cur.execute('SELECT COUNT(*) FROM radar_data')
-        total_records = cur.fetchone()[0]
-        
-        # Registros hoje
-        cur.execute('''
-            SELECT COUNT(*) FROM radar_data 
-            WHERE DATE(created_at) = CURRENT_DATE
-        ''')
-        today_records = cur.fetchone()[0]
-        
-        # Última atualização
-        cur.execute('''
-            SELECT MAX(created_at) FROM radar_data
-        ''')
-        last_update = cur.fetchone()[0]
-        
-        cur.close()
-        conn.close()
-        
-        return jsonify({
-            'total_records': total_records,
-            'today_records': today_records,
-            'last_update': last_update.isoformat() if last_update else None,
-            'database_size': 'N/A'  # Poderia ser calculado com consultas adicionais
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Erro ao buscar estatísticas: {e}")
-        return jsonify({'error': str(e)}), 500
-
-# Health check para Vercel
 @app.route('/api/health')
 def health_check():
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "service": "Radar DIY API"
-    })
-
-# Handler para erros 404
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({'error': 'Endpoint não encontrado'}), 404
-
-# Handler para erros 500
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({'error': 'Erro interno do servidor'}), 500
+    return jsonify({"status": "healthy"})
 
 if __name__ == '__main__':
-    # Executar inicialização final
-    logger.info("🚀 Serviço Radar DIY API iniciado!")
-    logger.info("📊 Verificando configuração do banco de dados...")
-    
-    if test_db_connection():
-        logger.info("✅ Banco de dados configurado corretamente")
-    else:
-        logger.error("❌ Problema na configuração do banco de dados")
-    
-    # Para desenvolvimento local
     app.run(host='0.0.0.0', port=5000, debug=True)
