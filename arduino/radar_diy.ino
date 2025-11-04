@@ -22,7 +22,7 @@ bool movingForward = true;
 // Configurações WiFi 
 const char* SSID = "iPhone de Owen";
 const char* PASSWORD = "1234567890";
-const char* HOST = "https://vercel.com/owens-projects-0be75bfe/tam"; 
+const char* HOST = "https://tam-two.vercel.app/"; 
 
 void setup() {
   Serial.begin(9600);
