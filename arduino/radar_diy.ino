@@ -12,17 +12,23 @@ int servoPin = 9;
 const int trigPin = 10;
 const int echoPin = 11;
 
+// LED RGB
+const int redPin = 5;    
+const int greenPin = 6;  
+const int bluePin = 7;
+
 // Variáveis
 long duration;
 int distance;
 int angle = 0;
 int increment = 5;
 bool movingForward = true;
+bool wifiConnected = false;
 
-// Configurações WiFi 
-const char* SSID = "iPhone de Owen";
-const char* PASSWORD = "1234567890";
-const char* HOST = "https://tam-two.vercel.app/"; 
+// Configurações WiFi - ALTERE AQUI!
+const char* SSID = "SUA_REDE_WIFI";
+const char* PASSWORD = "SUA_SENHA_WIFI";
+const char* HOST = "seu-app.vercel.app";
 
 void setup() {
   Serial.begin(9600);
@@ -31,36 +37,55 @@ void setup() {
   // Configurar servo
   radarServo.attach(servoPin);
   
-  // Configurar sensor ultrassônico
+  // Configurar sensor
   pinMode(trigPin, OUTPUT);
   pinMode(echoPin, INPUT);
   
-  // Inicializar WiFi
+  // Configurar LED RGB
+  pinMode(redPin, OUTPUT);
+  pinMode(greenPin, OUTPUT);
+  pinMode(bluePin, OUTPUT);
+  
+  // LED azul (inicializando)
+  setColor(0, 0, 255);
+  
+  // Conectar WiFi
   delay(2000);
   connectWiFi();
   
   Serial.println("Sistema Radar DIY iniciado!");
 }
 
+void setColor(int red, int green, int blue) {
+  analogWrite(redPin, red);
+  analogWrite(greenPin, green); 
+  analogWrite(bluePin, blue);
+}
+
 void connectWiFi() {
   Serial.println("Conectando ao WiFi...");
+  setColor(255, 255, 0); // Amarelo (conectando)
   
-  // Reset do ESP
   sendCommand("AT+RST", 2000);
   delay(2000);
   
-  // Configurar como station
   sendCommand("AT+CWMODE=1", 2000);
   
-  // Conectar à rede WiFi
   String connectCmd = "AT+CWJAP=\"" + String(SSID) + "\",\"" + String(PASSWORD) + "\"";
-  sendCommand(connectCmd, 10000);
+  String response = sendCommand(connectCmd, 10000);
   
-  // Verificar IP
-  sendCommand("AT+CIFSR", 2000);
-  
-  // Configurar conexão única
-  sendCommand("AT+CIPMUX=0", 2000);
+  if (response.indexOf("OK") != -1) {
+    wifiConnected = true;
+    setColor(0, 255, 0); // Verde (conectado)
+    Serial.println("✅ WiFi conectado!");
+    
+    sendCommand("AT+CIFSR", 2000);
+    sendCommand("AT+CIPMUX=0", 2000);
+  } else {
+    wifiConnected = false;
+    setColor(255, 0, 0); // Vermelho (erro)
+    Serial.println("❌ Falha na conexão WiFi");
+  }
 }
 
 String sendCommand(String command, int delayTime) {
@@ -78,31 +103,32 @@ String sendCommand(String command, int delayTime) {
 }
 
 void measureDistance() {
-  // Limpar o trigPin
   digitalWrite(trigPin, LOW);
   delayMicroseconds(2);
-  
-  // Setar trigPin HIGH por 10 microsegundos
   digitalWrite(trigPin, HIGH);
   delayMicroseconds(10);
   digitalWrite(trigPin, LOW);
   
-  // Ler echoPin
   duration = pulseIn(echoPin, HIGH);
-  
-  // Calcular distância
   distance = duration * 0.034 / 2;
 }
 
+void updateLED(int distance) {
+  // 2 cores: Vermelho/Verde
+  if (distance < 30 && distance > 2) {
+    setColor(255, 0, 0); // Vermelho - Objeto detectado
+  } else {
+    setColor(0, 255, 0); // Verde - Área livre
+  }
+}
+
 void sendToAPI(int angle, int distance) {
-  if (distance > 2 && distance < 400) { // Filtro para valores válidos
+  if (distance > 2 && distance < 400 && wifiConnected) {
     
-    // Criar JSON com dados
     String jsonData = "{\"angle\":" + String(angle) + 
                      ",\"distance\":" + String(distance) + 
                      ",\"timestamp\":" + String(millis()) + "}";
     
-    // Preparar comando HTTP
     String httpCmd = "AT+CIPSTART=\"TCP\",\"" + String(HOST) + "\",80";
     if (sendCommand(httpCmd, 3000).indexOf("OK") != -1) {
       
@@ -113,13 +139,12 @@ void sendToAPI(int angle, int distance) {
       postRequest += "Connection: close\r\n\r\n";
       postRequest += jsonData;
       
-      // Enviar dados
       String sendCmd = "AT+CIPSEND=" + String(postRequest.length());
       if (sendCommand(sendCmd, 2000).indexOf(">") != -1) {
         sendCommand(postRequest, 2000);
+        Serial.println("✅ Dados enviados!");
       }
       
-      // Fechar conexão
       sendCommand("AT+CIPCLOSE", 1000);
     }
   }
@@ -133,10 +158,13 @@ void loop() {
   // Medir distância
   measureDistance();
   
-  // Enviar dados para API
+  // Atualizar LED
+  updateLED(distance);
+  
+  // Enviar dados
   sendToAPI(angle, distance);
   
-  // Exibir no monitor serial
+  // Serial monitor
   Serial.print("Ângulo: ");
   Serial.print(angle);
   Serial.print("° - Distância: ");
@@ -146,15 +174,11 @@ void loop() {
   // Atualizar ângulo
   if (movingForward) {
     angle += increment;
-    if (angle >= 180) {
-      movingForward = false;
-    }
+    if (angle >= 180) movingForward = false;
   } else {
     angle -= increment;
-    if (angle <= 0) {
-      movingForward = true;
-    }
+    if (angle <= 0) movingForward = true;
   }
   
-  delay(300); // Ajuste este delay para velocidade do radar
+  delay(300);
 }
