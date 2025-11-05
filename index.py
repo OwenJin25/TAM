@@ -22,22 +22,24 @@ DB_CONFIG = {
 USE_POSTGRESQL = False
 radar_data = []  # Backup em memória
 
-# Tentar conectar com PostgreSQL
+# Tentar conectar com PostgreSQL usando psycopg2
 def get_db_connection():
     try:
-        import pg8000
-        conn = pg8000.connect(**DB_CONFIG)
+        import psycopg2
+        conn = psycopg2.connect(**DB_CONFIG)
         global USE_POSTGRESQL
         USE_POSTGRESQL = True
-        logger.info("✅ Conectado ao PostgreSQL")
+        logger.info("✅ Conectado ao PostgreSQL via psycopg2")
         return conn
     except Exception as e:
         logger.warning(f"⚠️ PostgreSQL não disponível: {e}")
+        logger.info("🔄 Usando modo em memória")
         return None
 
 # Inicialização segura
 def safe_init():
     try:
+        logger.info("🔄 Tentando conectar com PostgreSQL...")
         conn = get_db_connection()
         if conn:
             try:
@@ -56,7 +58,7 @@ def safe_init():
                 conn.close()
                 logger.info("✅ Tabela PostgreSQL pronta")
             except Exception as e:
-                logger.warning(f"⚠️ Erro na tabela: {e}")
+                logger.warning(f"⚠️ Erro ao criar tabela: {e}")
         else:
             logger.info("🔧 Modo em memória ativado")
     except Exception as e:
