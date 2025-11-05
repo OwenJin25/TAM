@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify, render_template_string
-import psycopg2
+import pg8000
 import logging
 from datetime import datetime
 import os
