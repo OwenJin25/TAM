@@ -22,8 +22,13 @@ DB_CONFIG = {
 # Configuração do PostgreSQL
 def get_db_connection():
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        conn.autocommit = False
+        conn = pg8000.connect(
+            host=os.environ.get('PGHOST', 'aid.estgoh.ipc.pt'),
+            database=os.environ.get('PGDATABASE', 'db2022145941'), 
+            user=os.environ.get('PGUSER', 'a2022145941'),
+            password=os.environ.get('PGPASSWORD', '1234567890'),
+            port=int(os.environ.get('PGPORT', 5432))
+        )
         return conn
     except Exception as e:
         logger.error(f"❌ Erro de conexão com o banco: {e}")
