@@ -1,5 +1,4 @@
-from flask import Flask, request, jsonify, render_template_string
-import psycopg2
+from flask import Flask, request, jsonify
 import logging
 from datetime import datetime
 import os
@@ -12,290 +11,165 @@ logger = logging.getLogger(__name__)
 
 # SUAS CREDENCIAIS POSTGRESQL
 DB_CONFIG = {
-    "host": "aid.estgoh.ipc.pt",
-    "database": "db2022145941", 
-    "user": "a2022145941",
-    "password": "1234567890",
-    "port": 5432
+    "host": os.environ.get('DB_HOST', 'aid.estgoh.ipc.pt'),
+    "database": os.environ.get('DB_NAME', 'db2022145941'), 
+    "user": os.environ.get('DB_USER', 'a2022145941'),
+    "password": os.environ.get('DB_PASSWORD', '1234567890'),
+    "port": int(os.environ.get('DB_PORT', 5432))
 }
 
-# Configuração do PostgreSQL
+# Sistema híbrido
+USE_POSTGRESQL = False
+radar_data = []  # Backup em memória
+
+# Tentar conectar com PostgreSQL
 def get_db_connection():
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        conn.autocommit = False
+        import pg8000
+        conn = pg8000.connect(**DB_CONFIG)
+        global USE_POSTGRESQL
+        USE_POSTGRESQL = True
+        logger.info("✅ Conectado ao PostgreSQL")
         return conn
     except Exception as e:
-        logger.error(f"❌ Erro de conexão com o banco: {e}")
+        logger.warning(f"⚠️ PostgreSQL não disponível: {e}")
         return None
-# Teste de conexão imediato
-def test_connection_immediately():
-    try:
-        logger.info("🔧 Testando conexão com PostgreSQL...")
-        logger.info(f"📡 Host: {DB_CONFIG['host']}")
-        logger.info(f"📊 Database: {DB_CONFIG['database']}")
-        logger.info(f"👤 User: {DB_CONFIG['user']}")
-        
-        conn = psycopg2.connect(**DB_CONFIG)
-        logger.info("✅ Conexão PostgreSQL BEM-SUCEDIDA!")
-        conn.close()
-        return True
-    except Exception as e:
-        logger.error(f"❌ FALHA na conexão PostgreSQL: {e}")
-        return False
 
-# Executar teste imediato
-test_connection_immediately()
-# Criar tabela automaticamente
-def init_db():
-    try:
-        conn = get_db_connection()
-        if conn is None:
-            logger.error("Não foi possível conectar ao banco para criar tabela")
-            return False
-            
-        cur = conn.cursor()
-        
-        # Verificar se tabela existe
-        cur.execute('''
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_name = 'radar_data'
-            );
-        ''')
-        table_exists = cur.fetchone()[0]
-        
-        if not table_exists:
-            logger.info("🔄 Criando tabela radar_data...")
-            cur.execute('''
-                CREATE TABLE radar_data (
-                    id SERIAL PRIMARY KEY,
-                    angle INTEGER NOT NULL,
-                    distance INTEGER NOT NULL,
-                    timestamp BIGINT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            # Criar índice para performance
-            cur.execute('''
-                CREATE INDEX idx_radar_data_created_at 
-                ON radar_data(created_at DESC)
-            ''')
-            
-            conn.commit()
-            logger.info("✅ Tabela 'radar_data' criada com sucesso!")
-        else:
-            logger.info("✅ Tabela 'radar_data' já existe")
-        
-        cur.close()
-        conn.close()
-        return True
-        
-    except Exception as e:
-        logger.error(f"❌ Erro ao criar/verificar tabela: {e}")
-        return False
-
-# Testar conexão com banco
-def test_db_connection():
+# Inicialização segura
+def safe_init():
     try:
         conn = get_db_connection()
         if conn:
-            cur = conn.cursor()
-            cur.execute("SELECT version();")
-            version = cur.fetchone()
-            cur.close()
-            conn.close()
-            logger.info(f"✅ Conexão PostgreSQL OK: {version[0]}")
-            return True
-        return False
+            try:
+                cur = conn.cursor()
+                cur.execute('''
+                    CREATE TABLE IF NOT EXISTS radar_data (
+                        id SERIAL PRIMARY KEY,
+                        angle INTEGER NOT NULL,
+                        distance INTEGER NOT NULL,
+                        timestamp BIGINT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+                conn.commit()
+                cur.close()
+                conn.close()
+                logger.info("✅ Tabela PostgreSQL pronta")
+            except Exception as e:
+                logger.warning(f"⚠️ Erro na tabela: {e}")
+        else:
+            logger.info("🔧 Modo em memória ativado")
     except Exception as e:
-        logger.error(f"❌ Teste de conexão falhou: {e}")
-        return False
+        logger.error(f"❌ Erro na inicialização: {e}")
 
-# Executar inicialização
-logger.info("🔄 Iniciando aplicação Radar DIY...")
-db_ok = init_db()
-if db_ok:
-    test_db_connection()
-else:
-    logger.error("❌ Falha na inicialização do banco de dados")
+# Inicializar
+logger.info("🔄 Iniciando Radar DIY...")
+safe_init()
 
 @app.route('/')
 def home():
-    return render_template_string('''
+    return '''
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Radar DIY - Monitoramento em Tempo Real</title>
+        <title>Radar DIY - Sistema Online</title>
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
         <style>
-            * {
-                margin: 0;
-                padding: 0;
-                box-sizing: border-box;
-            }
-            
-            body {
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body { 
                 font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
                 background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                min-height: 100vh;
+                min-height: 100vh; 
                 padding: 20px;
             }
-            
-            .container {
-                max-width: 1200px;
+            .container { 
+                max-width: 1200px; 
                 margin: 0 auto;
             }
-            
-            .header {
-                text-align: center;
-                color: white;
+            .header { 
+                text-align: center; 
+                color: white; 
                 margin-bottom: 30px;
+                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
             }
-            
             .header h1 {
                 font-size: 2.5rem;
                 margin-bottom: 10px;
-                text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
             }
-            
-            .header p {
-                font-size: 1.1rem;
-                opacity: 0.9;
-            }
-            
-            .card {
-                background: white;
-                padding: 25px;
-                margin: 15px 0;
-                border-radius: 15px;
+            .card { 
+                background: white; 
+                padding: 25px; 
+                margin: 20px 0; 
+                border-radius: 15px; 
                 box-shadow: 0 8px 32px rgba(0,0,0,0.1);
-                border: 1px solid rgba(255,255,255,0.2);
             }
-            
-            .card h2 {
-                color: #333;
-                margin-bottom: 15px;
-                font-size: 1.4rem;
+            .card h2 { 
+                color: #333; 
+                margin-bottom: 20px;
                 border-bottom: 2px solid #667eea;
-                padding-bottom: 8px;
+                padding-bottom: 10px;
             }
-            
             .status-container {
                 display: grid;
                 grid-template-columns: 1fr 1fr 1fr;
                 gap: 15px;
                 margin-bottom: 20px;
             }
-            
-            .status {
-                padding: 15px;
-                border-radius: 10px;
-                text-align: center;
+            .status { 
+                padding: 20px; 
+                border-radius: 10px; 
+                text-align: center; 
                 font-weight: bold;
+                font-size: 1.1rem;
             }
-            
-            .status.online {
-                background: #d4edda;
-                color: #155724;
-                border: 2px solid #c3e6cb;
-            }
-            
-            .status.offline {
-                background: #f8d7da;
-                color: #721c24;
-                border: 2px solid #f5c6cb;
-            }
-            
-            .status.connecting {
-                background: #fff3cd;
-                color: #856404;
-                border: 2px solid #ffeaa7;
-            }
-            
+            .online { background: #d4edda; color: #155724; border: 2px solid #c3e6cb; }
+            .offline { background: #f8d7da; color: #721c24; border: 2px solid #f5c6cb; }
+            .connecting { background: #fff3cd; color: #856404; border: 2px solid #ffeaa7; }
             .charts-container {
                 display: grid;
                 grid-template-columns: 1fr 1fr;
                 gap: 20px;
             }
-            
             .chart-wrapper {
                 background: #f8f9fa;
-                padding: 15px;
+                padding: 20px;
                 border-radius: 10px;
-                border: 1px solid #e9ecef;
             }
-            
             .data-table {
                 width: 100%;
                 border-collapse: collapse;
-                margin-top: 10px;
+                margin-top: 15px;
             }
-            
-            .data-table th,
-            .data-table td {
+            .data-table th, .data-table td {
                 padding: 12px;
                 text-align: center;
                 border-bottom: 1px solid #dee2e6;
             }
-            
             .data-table th {
                 background: #667eea;
                 color: white;
-                font-weight: 600;
             }
-            
-            .data-table tr:nth-child(even) {
-                background: #f8f9fa;
-            }
-            
-            .data-table tr:hover {
-                background: #e9ecef;
-            }
-            
             .controls {
                 display: flex;
                 gap: 10px;
                 margin-top: 15px;
             }
-            
             button {
-                padding: 10px 20px;
+                padding: 12px 24px;
                 border: none;
-                border-radius: 5px;
+                border-radius: 8px;
                 background: #667eea;
                 color: white;
                 font-weight: bold;
                 cursor: pointer;
-                transition: all 0.3s ease;
+                transition: all 0.3s;
             }
-            
             button:hover {
                 background: #5a6fd8;
                 transform: translateY(-2px);
-                box-shadow: 0 4px 8px rgba(0,0,0,0.2);
             }
-            
-            button.clear {
-                background: #dc3545;
-            }
-            
-            button.clear:hover {
-                background: #c82333;
-            }
-            
-            button.test {
-                background: #28a745;
-            }
-            
-            button.test:hover {
-                background: #218838;
-            }
-            
             @media (max-width: 768px) {
-                .status-container,
-                .charts-container {
+                .status-container, .charts-container {
                     grid-template-columns: 1fr;
                 }
             }
@@ -304,11 +178,10 @@ def home():
     <body>
         <div class="container">
             <div class="header">
-                <h1>🚨 Radar DIY - Sistema de Monitoramento</h1>
-                <p>Monitoramento em tempo real com Arduino, ESP8266 e PostgreSQL</p>
+                <h1>🚨 Radar DIY - Sistema Online</h1>
+                <p>Monitoramento em tempo real com Arduino e PostgreSQL</p>
             </div>
             
-            <!-- Card de Status -->
             <div class="card">
                 <h2>📊 Status do Sistema</h2>
                 <div class="status-container">
@@ -325,12 +198,11 @@ def home():
                         <div>Desconhecido</div>
                     </div>
                 </div>
-                <div id="lastUpdate" style="text-align: center; margin-top: 10px; font-style: italic; color: #666;">
+                <div id="lastUpdate" style="text-align: center; margin-top: 15px; font-style: italic; color: #666;">
                     Última atualização: Nunca
                 </div>
             </div>
-    
-            <!-- Card de Gráficos -->
+
             <div class="card">
                 <h2>📈 Visualizações</h2>
                 <div class="charts-container">
@@ -344,8 +216,7 @@ def home():
                     </div>
                 </div>
             </div>
-            
-            <!-- Card de Dados -->
+
             <div class="card">
                 <h2>📋 Últimas Leituras</h2>
                 <div style="max-height: 300px; overflow-y: auto;">
@@ -353,7 +224,7 @@ def home():
                         <thead>
                             <tr>
                                 <th>Ângulo</th>
-                                <th>Distância (cm)</th>
+                                <th>Distância</th>
                                 <th>Timestamp</th>
                                 <th>Hora</th>
                             </tr>
@@ -366,186 +237,330 @@ def home():
                     </table>
                 </div>
             </div>
-            
-            <!-- Card de Controles -->
+
             <div class="card">
                 <h2>🎮 Controles</h2>
                 <div class="controls">
-                    <button onclick="clearOldData()" class="clear">🗑️ Limpar Dados Antigos</button>
-                    <button onclick="testConnection()" class="test">🔍 Testar Conexão</button>
-                    <button onclick="fetchLatestData()" class="test">🔄 Atualizar Dados</button>
+                    <button onclick="clearData()">🗑️ Limpar Dados</button>
+                    <button onclick="testConnection()">🔍 Testar Conexão</button>
+                    <button onclick="fetchData()">🔄 Atualizar Dados</button>
                 </div>
             </div>
         </div>
+
+        <script>
+            let radarChart, distanceChart;
+            let updateInterval;
+
+            // Inicializar gráficos
+            function initializeCharts() {
+                const radarCtx = document.getElementById('radarChart').getContext('2d');
+                radarChart = new Chart(radarCtx, {
+                    type: 'radar',
+                    data: {
+                        labels: Array.from({length: 37}, (_, i) => i * 5 + '°'),
+                        datasets: [{
+                            label: 'Distância (cm)',
+                            data: Array(37).fill(0),
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        scales: {
+                            r: {
+                                beginAtZero: true,
+                                max: 200,
+                                ticks: { stepSize: 50 }
+                            }
+                        }
+                    }
+                });
+
+                const distanceCtx = document.getElementById('distanceChart').getContext('2d');
+                distanceChart = new Chart(distanceCtx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Distância (cm)',
+                            data: [],
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.1)',
+                            borderWidth: 2,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 200
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Atualizar status
+            async function updateDBStatus() {
+                try {
+                    const response = await fetch('/api/status');
+                    const data = await response.json();
+                    
+                    const dbStatus = document.getElementById('dbStatus');
+                    if (data.database === 'postgresql') {
+                        dbStatus.className = 'status online';
+                        dbStatus.innerHTML = '<div>🗄️ Banco de Dados</div><div>✅ PostgreSQL</div>';
+                    } else {
+                        dbStatus.className = 'status connecting';
+                        dbStatus.innerHTML = '<div>🗄️ Banco de Dados</div><div>🔄 Memória</div>';
+                    }
+                } catch (error) {
+                    document.getElementById('dbStatus').className = 'status offline';
+                    document.getElementById('dbStatus').innerHTML = '<div>🗄️ Banco de Dados</div><div>❌ Offline</div>';
+                }
+            }
+
+            // Buscar dados
+            async function fetchData() {
+                try {
+                    const response = await fetch('/api/radar/latest');
+                    const data = await response.json();
+                    
+                    if (data && data.length > 0) {
+                        updateRadarStatus('online');
+                        updateCharts(data[0]);
+                        updateTable(data);
+                        updateLastUpdate();
+                    } else {
+                        updateRadarStatus('offline');
+                    }
+                } catch (error) {
+                    updateRadarStatus('offline');
+                }
+            }
+
+            function updateRadarStatus(status) {
+                const radarStatus = document.getElementById('radarStatus');
+                if (status === 'online') {
+                    radarStatus.className = 'status online';
+                    radarStatus.innerHTML = '<div>📡 Radar</div><div>✅ Recebendo dados</div>';
+                } else {
+                    radarStatus.className = 'status offline';
+                    radarStatus.innerHTML = '<div>📡 Radar</div><div>❌ Sem dados</div>';
+                }
+            }
+
+            function updateLEDStatus(distance) {
+                const ledStatus = document.getElementById('ledStatus');
+                if (distance < 30) {
+                    ledStatus.className = 'status offline';
+                    ledStatus.innerHTML = '<div>💡 LED RGB</div><div>🔴 Objeto Detectado</div>';
+                } else {
+                    ledStatus.className = 'status online';
+                    ledStatus.innerHTML = '<div>💡 LED RGB</div><div>🟢 Área Livre</div>';
+                }
+            }
+
+            function updateCharts(latestData) {
+                if (!latestData) return;
+                
+                updateLEDStatus(latestData.distance);
+                
+                // Radar
+                const angleIndex = Math.floor(latestData.angle / 5);
+                if (angleIndex >= 0 && angleIndex < 37) {
+                    radarChart.data.datasets[0].data[angleIndex] = latestData.distance;
+                    radarChart.update('none');
+                }
+                
+                // Linha
+                const time = new Date().toLocaleTimeString();
+                distanceChart.data.labels.push(time);
+                distanceChart.data.datasets[0].data.push(latestData.distance);
+                
+                if (distanceChart.data.labels.length > 20) {
+                    distanceChart.data.labels.shift();
+                    distanceChart.data.datasets[0].data.shift();
+                }
+                distanceChart.update('none');
+            }
+
+            function updateTable(data) {
+                const tableBody = document.getElementById('readingsTable');
+                tableBody.innerHTML = '';
+                
+                data.slice(0, 10).forEach(item => {
+                    const row = document.createElement('tr');
+                    const time = new Date(item.created_at || Date.now()).toLocaleTimeString();
+                    
+                    row.innerHTML = `
+                        <td>${item.angle}°</td>
+                        <td>${item.distance} cm</td>
+                        <td>${item.timestamp}</td>
+                        <td>${time}</td>
+                    `;
+                    tableBody.appendChild(row);
+                });
+            }
+
+            function updateLastUpdate() {
+                document.getElementById('lastUpdate').textContent = 
+                    `Última atualização: ${new Date().toLocaleTimeString()}`;
+            }
+
+            async function clearData() {
+                if (!confirm('Limpar todos os dados?')) return;
+                try {
+                    await fetch('/api/radar/clear', {method: 'DELETE'});
+                    alert('Dados limpos!');
+                    location.reload();
+                } catch (error) {
+                    alert('Erro ao limpar dados.');
+                }
+            }
+
+            async function testConnection() {
+                await updateDBStatus();
+                await fetchData();
+                alert('Teste de conexão concluído!');
+            }
+
+            // Inicializar
+            document.addEventListener('DOMContentLoaded', function() {
+                initializeCharts();
+                updateDBStatus();
+                fetchData();
+                
+                // Atualizar a cada 3 segundos
+                updateInterval = setInterval(fetchData, 3000);
+            });
+        </script>
     </body>
     </html>
-    ''')
+    '''
 
-# Endpoints da API
 @app.route('/api/status')
 def api_status():
-    """Endpoint para verificar status do sistema"""
-    try:
-        conn = get_db_connection()
-        if conn:
-            conn.close()
-            db_status = "connected"
-        else:
-            db_status = "disconnected"
-            
-        return jsonify({
-            "status": "online",
-            "database": db_status,
-            "timestamp": datetime.now().isoformat()
-        })
-    except Exception as e:
-        return jsonify({
-            "status": "error",
-            "database": "disconnected",
-            "error": str(e)
-        }), 500
+    return jsonify({
+        "status": "healthy",
+        "database": "postgresql" if USE_POSTGRESQL else "memory",
+        "timestamp": datetime.now().isoformat()
+    })
 
 @app.route('/api/radar/data', methods=['POST', 'GET'])
 def handle_radar_data():
     if request.method == 'POST':
         try:
             data = request.get_json()
-            
-            if not data:
-                return jsonify({'error': 'Dados JSON inválidos'}), 400
-            
             angle = data.get('angle')
             distance = data.get('distance')
             timestamp = data.get('timestamp')
-            
+
             if angle is None or distance is None:
-                return jsonify({'error': 'Ângulo e distância são obrigatórios'}), 400
-            
-            # Salvar no PostgreSQL
-            conn = get_db_connection()
-            if conn is None:
-                return jsonify({'error': 'Erro de conexão com o banco'}), 500
-                
-            cur = conn.cursor()
-            
-            cur.execute(
-                'INSERT INTO radar_data (angle, distance, timestamp) VALUES (%s, %s, %s)',
-                (angle, distance, timestamp)
-            )
-            
-            conn.commit()
-            cur.close()
-            conn.close()
-            
-            logger.info(f"✅ Dados salvos: Ângulo={angle}°, Distância={distance}cm")
-            return jsonify({
-                'message': 'Dados salvos com sucesso',
-                'angle': angle,
-                'distance': distance
-            }), 201
-            
-        except Exception as e:
-            logger.error(f"❌ Erro ao salvar dados: {e}")
-            return jsonify({'error': str(e)}), 500
-    
-    else:  # GET
-        try:
-            conn = get_db_connection()
-            if conn is None:
-                return jsonify({'error': 'Erro de conexão com o banco'}), 500
-                
-            cur = conn.cursor()
-            
-            cur.execute('''
-                SELECT id, angle, distance, timestamp, created_at 
-                FROM radar_data 
-                ORDER BY created_at DESC 
-                LIMIT 100
-            ''')
-            data = cur.fetchall()
-            
-            result = []
-            for row in data:
-                result.append({
-                    'id': row[0],
-                    'angle': row[1],
-                    'distance': row[2],
-                    'timestamp': row[3],
-                    'created_at': row[4].isoformat() if row[4] else None
+                return jsonify({'error': 'Dados incompletos'}), 400
+
+            # Salvar no PostgreSQL ou memória
+            if USE_POSTGRESQL:
+                conn = get_db_connection()
+                if conn:
+                    cur = conn.cursor()
+                    cur.execute(
+                        'INSERT INTO radar_data (angle, distance, timestamp) VALUES (%s, %s, %s)',
+                        (angle, distance, timestamp)
+                    )
+                    conn.commit()
+                    cur.close()
+                    conn.close()
+            else:
+                radar_data.append({
+                    'angle': angle,
+                    'distance': distance,
+                    'timestamp': timestamp,
+                    'created_at': datetime.now().isoformat()
                 })
-            
-            cur.close()
-            conn.close()
-            
-            return jsonify(result)
-            
+                if len(radar_data) > 100:
+                    radar_data.pop(0)
+
+            logger.info(f"✅ Dados recebidos: {angle}°, {distance}cm")
+            return jsonify({'message': 'Dados salvos'}), 201
+
         except Exception as e:
             return jsonify({'error': str(e)}), 500
+
+    else:  # GET
+        if USE_POSTGRESQL:
+            try:
+                conn = get_db_connection()
+                if conn:
+                    cur = conn.cursor()
+                    cur.execute('''
+                        SELECT angle, distance, timestamp, created_at 
+                        FROM radar_data 
+                        ORDER BY created_at DESC 
+                        LIMIT 100
+                    ''')
+                    results = cur.fetchall()
+                    cur.close()
+                    conn.close()
+                    return jsonify([{
+                        'angle': r[0], 'distance': r[1], 'timestamp': r[2],
+                        'created_at': r[3].isoformat() if r[3] else None
+                    } for r in results])
+            except Exception as e:
+                logger.error(f"Erro PostgreSQL: {e}")
+        
+        return jsonify(radar_data)
 
 @app.route('/api/radar/latest')
 def get_latest_data():
-    """Buscar os dados mais recentes"""
-    try:
-        conn = get_db_connection()
-        if conn is None:
-            return jsonify({'error': 'Erro de conexão com o banco'}), 500
-            
-        cur = conn.cursor()
-        
-        cur.execute('''
-            SELECT id, angle, distance, timestamp, created_at 
-            FROM radar_data 
-            ORDER BY created_at DESC 
-            LIMIT 10
-        ''')
-        data = cur.fetchall()
-        
-        result = []
-        for row in data:
-            result.append({
-                'id': row[0],
-                'angle': row[1],
-                'distance': row[2],
-                'timestamp': row[3],
-                'created_at': row[4].isoformat() if row[4] else None
-            })
-        
-        cur.close()
-        conn.close()
-        
-        return jsonify(result)
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+    if USE_POSTGRESQL:
+        try:
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                cur.execute('''
+                    SELECT angle, distance, timestamp, created_at 
+                    FROM radar_data 
+                    ORDER BY created_at DESC 
+                    LIMIT 10
+                ''')
+                results = cur.fetchall()
+                cur.close()
+                conn.close()
+                return jsonify([{
+                    'angle': r[0], 'distance': r[1], 'timestamp': r[2],
+                    'created_at': r[3].isoformat() if r[3] else None
+                } for r in results])
+        except:
+            pass
+    
+    return jsonify(radar_data[-10:] if radar_data else [])
 
 @app.route('/api/radar/clear', methods=['DELETE'])
-def clear_old_data():
-    """Limpar dados antigos"""
-    try:
-        conn = get_db_connection()
-        if conn is None:
-            return jsonify({'error': 'Erro de conexão com o banco'}), 500
-            
-        cur = conn.cursor()
-        
-        cur.execute('DELETE FROM radar_data')
-        deleted_count = cur.rowcount
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        logger.info(f"🗑️ {deleted_count} registros removidos")
-        return jsonify({
-            'message': f'{deleted_count} registros removidos'
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+def clear_data():
+    if USE_POSTGRESQL:
+        try:
+            conn = get_db_connection()
+            if conn:
+                cur = conn.cursor()
+                cur.execute('DELETE FROM radar_data')
+                conn.commit()
+                cur.close()
+                conn.close()
+        except:
+            pass
+    
+    radar_data.clear()
+    return jsonify({'message': 'Dados limpos'})
 
 @app.route('/api/health')
-def health_check():
+def health():
     return jsonify({"status": "healthy"})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
+else:
+    application = app
