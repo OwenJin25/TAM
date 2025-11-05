@@ -10,13 +10,13 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# SUAS CREDENCIAIS POSTGRESQL
+# Credenciais from environment variables
 DB_CONFIG = {
-    "host": "aid.estgoh.ipc.pt",
-    "database": "db2022145941", 
-    "user": "a2022145941",
-    "password": "1234567890",
-    "port": 5432
+    "host": os.environ.get('PGHOST', 'aid.estgoh.ipc.pt'),
+    "database": os.environ.get('PGDATABASE', 'db2022145941'), 
+    "user": os.environ.get('PGUSER', 'a2022145941'),
+    "password": os.environ.get('PGPASSWORD', '1234567890'),
+    "port": int(os.environ.get('PGPORT', 5432))
 }
 
 # Configuração do PostgreSQL
